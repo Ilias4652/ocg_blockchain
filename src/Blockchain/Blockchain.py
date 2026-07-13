@@ -28,7 +28,6 @@ class Blockchain(object):
         self.chain.append(block)
         return block
     
-    def new_transactions(self,sender,recipient,ammount,signature=None):
      def new_transactions(self, sender, recipient, amount, signature=None):
         transaction = {
             'sender': sender,
