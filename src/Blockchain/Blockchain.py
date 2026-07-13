@@ -2,8 +2,10 @@ import hashlib
 import json
 from time import time
 from urllib.parse import urlparse
-
 import requests
+import digital_signature
+
+
 class Blockchain(object):
     def __init__(self):
         self.chain = []
@@ -13,35 +15,58 @@ class Blockchain(object):
         self.nodes = set()
         
     def new_block(self, proof, previous_hash=None):
-        #initiates a new block to the blockchain
-        block ={
-            'index':len(self.chain) +1, #index
-            'timestamp':time(), #time of creatin
-            'proof':proof, #proof of instance
-            'previous_hash': previous_hash or self.hash(self.chain[-1]), #pointer to previous block
+        block = {
+            'index': len(self.chain) + 1,
+            'timestamp': time(),
+            'transactions': self.current_transactions, # <-- Don't forget to include them!
+            'proof': proof,
+            'previous_hash': previous_hash or self.hash(self.chain[-1]),
         }
-        #resets the current list of transactions
+        
+        # Now it's safe to reset the pending transactions list
         self.current_transactions = []
-        #appends latest block to the chain
         self.chain.append(block)
         return block
     
-    def new_transactions(self,sender,recipient,ammount):
-        """
-        Creates a new transaction to go into the next mined Block
-        :param sender: <str> Address of the Sender
-        :param recipient: <str> Address of the Recipient
-        :param amount: <int> Amount
-        :return: <int> The index of the Block that will hold this transaction
-        """
-         
-        #adds a new transaction to the list of transactions
-        self.current_transactions.append({
+    def new_transactions(self,sender,recipient,ammount,signature=None):
+     def new_transactions(self, sender, recipient, amount, signature=None):
+        transaction = {
             'sender': sender,
             'recipient': recipient,
-            'ammount': ammount
-        })
-        return self.last_block['index']+1
+            'amount': amount
+        }
+        
+        tx_string = json.dumps(transaction, sort_keys=True) 
+        
+        if signature is None:
+            private_key = digital_signature.load_private_key()
+            signature = digital_signature.create_digital_signature(private_key, tx_string)
+            is_valid = digital_signature.verify_digital_signature(digital_signature.load_public_key(), signature, tx_string)
+        else:
+            # Reconstruct the public key from the string address
+            sender_pub_key = digital_signature.load_public_key_from_address(sender)
+            is_valid = digital_signature.verify_digital_signature(sender_pub_key, signature, tx_string)
+            
+        if not is_valid:
+            raise ValueError("Invalid transaction signature! Transaction rejected.")
+            
+        transaction['signature'] = signature
+        self.current_transactions.append(transaction)
+        return self.last_block['index'] + 1
+
+    # --- UPDATED PROOF OF WORK ---
+    def proof_of_work(self, last_proof, previous_hash):
+        proof = 0
+        while self.valid_proof(last_proof, proof, previous_hash) is False:
+            proof += 1
+        return proof
+    
+    @staticmethod
+    def valid_proof(last_proof, proof, previous_hash):
+        # Now secures the actual chain state, preventing pre-computation
+        guess = f'{last_proof}{proof}{previous_hash}'.encode()
+        guess_hash = hashlib.sha256(guess).hexdigest()
+        return guess_hash[:4] == "0000"
 
     def register_node(self,address):
         """
@@ -64,32 +89,7 @@ class Blockchain(object):
         return self.chain[-1]
     
 
-    def proof_of_work(self, last_proof):
-        """
-        Simple Proof of Work Algorithm:
-         - Find a number p' such that hash(pp') contains leading 4 zeroes, where p is the previous p'
-         - p is the previous proof, and p' is the new proof
-        :param last_proof: <int>
-        :return: <int>
-        """
-        proof = 0
-        while self.valid_proof(last_proof, proof) is False:
-            proof += 1
 
-        return proof
-    
-    @staticmethod
-    def valid_proof(last_proof, proof):
-        """
-        Validates the Proof: Does hash(last_proof, proof) contain 4 leading zeroes?
-        :param last_proof: <int> Previous Proof
-        :param proof: <int> Current Proof
-        :return: <bool> True if correct, False if not.
-        """
-
-        guess = f'{last_proof}{proof}'.encode()
-        guess_hash = hashlib.sha256(guess).hexdigest()
-        return guess_hash[:4] == "0000"
     
     def valid_chain(self,chain):
         """
